@@ -2,11 +2,11 @@ package s3_backend
 
 import (
 	"fmt"
-	"github.com/seaweedfs/seaweedfs/weed/util"
 	"io"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/seaweedfs/seaweedfs/weed/util"
 
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
@@ -86,14 +86,15 @@ func (s *S3BackendStorage) NewStorageFile(key string, tierInfo *volume_server_pb
 	return f
 }
 
-func (s *S3BackendStorage) CopyFile(f *os.File, fn func(progressed int64, percentage float32) error) (key string, size int64, err error) {
+func (s *S3BackendStorage) CopyFile(df *backend.DiskFile, fn func(progressed int64, percentage float32) error) (key string, size int64, err error) {
 	randomUuid, _ := uuid.NewRandom()
 	key = randomUuid.String()
 
-	glog.V(1).Infof("copying dat file of %s to remote s3.%s as %s", f.Name(), s.id, key)
+	// glog.V(1).Infof("copying dat file of %s to remote s3.%s as %s", f.Name(), s.id, key)
+	glog.V(1).Infof("copying dat file of a HDFS file to remote s3.%s as %s", s.id, key)
 
 	util.Retry("upload to S3", func() error {
-		size, err = uploadToS3(s.conn, f.Name(), s.bucket, key, s.storageClass, fn)
+		size, err = uploadToS3(s.conn, df, s.bucket, key, s.storageClass, fn)
 		return err
 	})
 

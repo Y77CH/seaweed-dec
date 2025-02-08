@@ -330,7 +330,8 @@ func (v *Volume) makeupDiff(newDatFileName, newIdxFileName, oldDatFileName, oldI
 			}
 			dstDatBackend.Write(needleBytes)
 			if err := dstDatBackend.Sync(); err != nil {
-				return fmt.Errorf("cannot sync needle %s: %v", dstDatBackend.File.Name(), err)
+				// return fmt.Errorf("cannot sync needle %s: %v", dstDatBackend.File.Name(), err)
+				return fmt.Errorf("cannot sync needle: %v", err)
 			}
 			util.Uint32toBytes(idxEntryBytes[8:12], uint32(offset/NeedlePaddingSize))
 		} else { //deleted needle
