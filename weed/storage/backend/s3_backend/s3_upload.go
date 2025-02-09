@@ -2,45 +2,64 @@ package s3_backend
 
 import (
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"os"
 	"sync"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+
 	"github.com/seaweedfs/seaweedfs/weed/glog"
+	"github.com/seaweedfs/seaweedfs/weed/storage/backend"
 )
 
-func uploadToS3(sess s3iface.S3API, filename string, destBucket string, destKey string, storageClass string, fn func(progressed int64, percentage float32) error) (fileSize int64, err error) {
+// s3UploadProgressedDiskFileReader implements io.Reader by wrapping a DiskFile.
+type s3UploadProgressedDiskFileReader struct {
+	df      *backend.DiskFile
+	size    int64
+	offset  int64
+	signMap map[int64]struct{}
+	fn      func(progressed int64, percentage float32) error
+}
 
-	//open the file
-	f, err := os.Open(filename)
-	if err != nil {
-		return 0, fmt.Errorf("failed to open file %q, %v", filename, err)
+func (r *s3UploadProgressedDiskFileReader) Read(p []byte) (int, error) {
+	n, err := r.df.ReadAt(p, r.offset)
+	if n > 0 {
+		r.offset += int64(n)
+		percentage := float32(r.offset*100) / float32(r.size)
+		if r.fn != nil {
+			if errCb := r.fn(r.offset, percentage); errCb != nil {
+				return n, errCb
+			}
+		}
 	}
-	defer f.Close()
+	return n, err
+}
 
-	info, err := f.Stat()
+func uploadToS3(sess s3iface.S3API, df *backend.DiskFile, destBucket string, destKey string, storageClass string, fn func(progressed int64, percentage float32) error) (fileSize int64, err error) {
+
+	// Get the file size from DiskFile.
+	fileSize, _, err = df.GetStat()
 	if err != nil {
-		return 0, fmt.Errorf("failed to stat file %q, %v", filename, err)
+		return 0, fmt.Errorf("failed to get stat of file %q, %v", df.Name(), err)
 	}
 
-	fileSize = info.Size()
-
-	partSize := int64(64 * 1024 * 1024) // The minimum/default allowed part size is 5MB
+	partSize := int64(64 * 1024 * 1024) // The minimum/default allowed part size is 64MB.
 	for partSize*1000 < fileSize {
 		partSize *= 4
 	}
 
-	// Create an uploader with the session and custom options
+	// Create an uploader with the session and custom options.
 	uploader := s3manager.NewUploaderWithClient(sess, func(u *s3manager.Uploader) {
 		u.PartSize = partSize
 		u.Concurrency = 5
 	})
 
-	fileReader := &s3UploadProgressedReader{
-		fp:      f,
+	// Create a reader that reads from the DiskFile.
+	fileReader := &s3UploadProgressedDiskFileReader{
+		df:      df,
 		size:    fileSize,
+		offset:  0,
 		signMap: map[int64]struct{}{},
 		fn:      fn,
 	}
@@ -54,13 +73,13 @@ func uploadToS3(sess s3iface.S3API, filename string, destBucket string, destKey 
 		StorageClass: aws.String(storageClass),
 	})
 
-	//in case it fails to upload
+	// In case it fails to upload.
 	if err != nil {
-		return 0, fmt.Errorf("failed to upload file %s: %v", filename, err)
+		return 0, fmt.Errorf("failed to upload file %s: %v", df.Name(), err)
 	}
-	glog.V(1).Infof("file %s uploaded to %s\n", filename, result.Location)
+	glog.V(1).Infof("file %s uploaded to %s\n", df.Name(), result.Location)
 
-	return
+	return fileSize, nil
 }
 
 // adapted from https://github.com/aws/aws-sdk-go/pull/1868
