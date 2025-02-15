@@ -27,8 +27,6 @@ const isMac = runtime.GOOS == "darwin"
 
 type DiskFile struct {
 	fs           C.hdfsFS
-	readFile     C.hdfsFile // may be nil if the file is empty
-	writeFile    C.hdfsFile
 	fullFilePath string
 	fileSize     int64
 	modTime      time.Time
@@ -79,31 +77,15 @@ func NewDiskFile(f *os.File) *DiskFile {
 		C.hdfsCloseFile(fs, wf)
 	}
 
-	// For reading, only open a read handle if the file is not empty.
-	var readFile C.hdfsFile = nil
-	if !empty {
-		readFile = C.hdfsOpenFile(fs, cPath, C.O_RDONLY, 0, 0, 0)
-		if readFile == nil {
-			glog.Fatalf("Failed to open file %s for reading in HDFS", fullPath)
-		}
-	}
-
-	// Open file for writing.
-	writeFile := C.hdfsOpenFile(fs, cPath, C.O_WRONLY, 0, 0, 0)
-	if writeFile == nil {
-		glog.Fatalf("Failed to open file %s for writing in HDFS", fullPath)
-	}
-
 	// Adjust file size to align with NeedlePaddingSize.
 	offset := size
 	if offset%NeedlePaddingSize != 0 {
 		offset = offset + (NeedlePaddingSize - offset%NeedlePaddingSize)
 	}
+	glog.Infof("offset is now %d", offset)
 
 	return &DiskFile{
 		fs:           fs,
-		readFile:     readFile,
-		writeFile:    writeFile,
 		fullFilePath: fullPath,
 		fileSize:     offset,
 		modTime:      mTime,
@@ -116,22 +98,28 @@ func (df *DiskFile) ReadAt(p []byte, off int64) (n int, err error) {
 	if df.empty {
 		return 0, io.EOF
 	}
-	// Ensure we have a valid read handle.
-	if df.readFile == nil {
-		cPath := C.CString(df.fullFilePath)
-		defer C.free(unsafe.Pointer(cPath))
-		df.readFile = C.hdfsOpenFile(df.fs, cPath, C.O_RDONLY, 0, 0, 0)
-		if df.readFile == nil {
-			glog.Errorf("Failed to flush new file %s in HDFS", df.fullFilePath)
-			return 0, fmt.Errorf("failed to open file %s for reading", df.fullFilePath)
+	pc, _, _, _ := runtime.Caller(1) // Get caller of this function
+	glog.Infof("ReadAt requested at %d for length %d by %s", off, len(p), runtime.FuncForPC(pc).Name())
+	// open file for reading
+	var readFile C.hdfsFile = nil
+	cPath := C.CString(df.fullFilePath)
+	defer C.free(unsafe.Pointer(cPath))
+	if !df.empty {
+		readFile = C.hdfsOpenFile(df.fs, cPath, C.O_RDONLY, 0, 0, 0)
+		if readFile == nil {
+			glog.Fatalf("Failed to open file %s for reading in HDFS", df.fullFilePath)
 		}
+		defer C.hdfsCloseFile(df.fs, readFile)
+	} else {
+		glog.Fatalf("Attempt to read empty file")
 	}
-	ret := C.hdfsSeek(df.fs, df.readFile, C.tOffset(off))
+	// seek & read
+	ret := C.hdfsSeek(df.fs, readFile, C.tOffset(off))
 	if ret != 0 {
 		glog.Errorf("hdfsSeek failed at offset %d in ReadAt", off)
 		return 0, fmt.Errorf("hdfsSeek failed at offset %d", off)
 	}
-	nRead := C.hdfsRead(df.fs, df.readFile, unsafe.Pointer(&p[0]), C.tSize(len(p)))
+	nRead := C.hdfsRead(df.fs, readFile, unsafe.Pointer(&p[0]), C.tSize(len(p)))
 	if nRead < 0 {
 		glog.Errorf("hdfsRead failed")
 		return int(nRead), fmt.Errorf("hdfsRead failed")
@@ -140,38 +128,52 @@ func (df *DiskFile) ReadAt(p []byte, off int64) (n int, err error) {
 }
 
 func (df *DiskFile) WriteAt(p []byte, off int64) (n int, err error) {
-	if df.writeFile == nil {
-		return 0, os.ErrClosed
+	glog.Infof("WriteAt requested for %x at offset %d", p, off)
+	// Ensure the write offset is 8 bytes aligned.
+	if off%8 != 0 {
+		return 0, fmt.Errorf("WriteAt offset %d is not 8 bytes aligned", off)
 	}
-	// If we are writing at offset 0 on an empty file, we assume the file pointer is already there.
-	if !(off == 0 && df.empty) {
-		ret := C.hdfsSeek(df.fs, df.writeFile, C.tOffset(off))
-		if ret != 0 {
-			glog.Errorf("hdfsSeek failed at offset %d in WriteAt", off)
-			return 0, fmt.Errorf("hdfsSeek failed at offset %d", off)
-		}
+
+	originalLen := len(p)
+	// If p is not a multiple of 8 in length, pad with extra zeros.
+	if originalLen%8 != 0 {
+		padSize := 8 - (originalLen % 8)
+		padded := make([]byte, originalLen+padSize)
+		copy(padded, p)
+		p = padded
+		glog.Infof("Data padded from %d to %d bytes", originalLen, len(p))
 	}
-	nWritten := C.hdfsWrite(df.fs, df.writeFile, unsafe.Pointer(&p[0]), C.tSize(len(p)))
-	if nWritten < 0 {
-		glog.Errorf("hdfsWrite failed")
+
+	glog.Infof("WriteAt requested at %d for length %d (actual write length %d)", off, originalLen, len(p))
+	var writeFile C.hdfsFile = nil
+	cPath := C.CString(df.fullFilePath)
+	defer C.free(unsafe.Pointer(cPath))
+	writeFile = C.hdfsOpenFile(df.fs, cPath, C.O_WRONLY|C.O_APPEND, 0, 0, 0)
+	if writeFile == nil {
+		glog.Fatalf("Failed to open file %s for writing in HDFS", df.fullFilePath)
+	}
+	defer C.hdfsCloseFile(df.fs, writeFile)
+
+	// Write the padded data.
+	nWritten := C.hdfsWrite(df.fs, writeFile, unsafe.Pointer(&p[0]), C.tSize(len(p)))
+	if nWritten < 0 || int(nWritten) != len(p) {
+		glog.Errorf("hdfsWrite failed, wrote %d bytes instead of %d", nWritten, len(p))
 		return int(nWritten), fmt.Errorf("hdfsWrite failed")
 	}
-	waterMark := off + int64(nWritten)
+
+	// Update the file size using the padded length.
+	waterMark := off + int64(len(p))
 	if waterMark > df.fileSize {
 		df.fileSize = waterMark
 		df.modTime = time.Now()
-		// If we have just written data to an empty file, mark it as non-empty and open a read handle.
 		if df.empty {
 			df.empty = false
-			cPath := C.CString(df.fullFilePath)
-			defer C.free(unsafe.Pointer(cPath))
-			df.readFile = C.hdfsOpenFile(df.fs, cPath, C.O_RDONLY, 0, 0, 0)
-			if df.readFile == nil {
-				glog.Errorf("failed to open file %s for reading after write", df.fullFilePath)
-			}
 		}
 	}
-	return int(nWritten), nil
+	df.FileSync()
+
+	// Return the original length to indicate the number of data bytes provided.
+	return originalLen, nil
 }
 
 func (df *DiskFile) Write(p []byte) (n int, err error) {
@@ -179,9 +181,31 @@ func (df *DiskFile) Write(p []byte) (n int, err error) {
 }
 
 func (df *DiskFile) Truncate(off int64) error {
-	if df.writeFile == nil {
-		return os.ErrClosed
+	// open file for reading
+	var readFile C.hdfsFile = nil
+	cPath := C.CString(df.fullFilePath)
+	defer C.free(unsafe.Pointer(cPath))
+	if !df.empty {
+		readFile = C.hdfsOpenFile(df.fs, cPath, C.O_RDONLY, 0, 0, 0)
+		if readFile == nil {
+			glog.Fatalf("Failed to open file %s for reading in HDFS", df.fullFilePath)
+		}
+		// not closed because it will be closed after copying
+		// defer C.hdfsCloseFile(df.fs, readFile)
+	} else {
+		glog.Fatalf("Attempt to read empty file")
 	}
+	// open file for writing
+	var writeFile C.hdfsFile = nil
+	cPath = C.CString(df.fullFilePath)
+	defer C.free(unsafe.Pointer(cPath))
+	writeFile = C.hdfsOpenFile(df.fs, cPath, C.O_WRONLY, 0, 0, 0)
+	if writeFile == nil {
+		glog.Fatalf("Failed to open file %s for writing in HDFS", df.fullFilePath)
+	}
+	// not closed because it will be closed after copying
+	// defer C.hdfsCloseFile(df.fs, writeFile)
+
 	// Use existing HDFS interfaces to implement truncate.
 	if off >= df.fileSize {
 		// Extend the file by writing zeros.
@@ -212,17 +236,17 @@ func (df *DiskFile) Truncate(off int64) error {
 	if df.empty {
 		// If the file is empty, nothing to do.
 		return nil
-	} else if df.readFile == nil {
+	} else if readFile == nil {
 		cOrigPath := C.CString(df.fullFilePath)
 		defer C.free(unsafe.Pointer(cOrigPath))
-		df.readFile = C.hdfsOpenFile(df.fs, cOrigPath, C.O_RDONLY, 0, 0, 0)
-		if df.readFile == nil {
+		readFile = C.hdfsOpenFile(df.fs, cOrigPath, C.O_RDONLY, 0, 0, 0)
+		if readFile == nil {
 			glog.Errorf("failed to open original file for reading during truncate")
 			return fmt.Errorf("failed to open original file for reading during truncate")
 		}
 	} else {
 		// Seek to the beginning.
-		if C.hdfsSeek(df.fs, df.readFile, C.tOffset(0)) != 0 {
+		if C.hdfsSeek(df.fs, readFile, C.tOffset(0)) != 0 {
 			glog.Errorf("failed to seek to beginning during truncate")
 			return fmt.Errorf("failed to seek to beginning during truncate")
 		}
@@ -244,7 +268,7 @@ func (df *DiskFile) Truncate(off int64) error {
 		if remaining < int64(bufSize) {
 			toRead = int(remaining)
 		}
-		nRead := C.hdfsRead(df.fs, df.readFile, unsafe.Pointer(&buffer[0]), C.tSize(toRead))
+		nRead := C.hdfsRead(df.fs, readFile, unsafe.Pointer(&buffer[0]), C.tSize(toRead))
 		if nRead < 0 {
 			C.hdfsCloseFile(df.fs, tempFile)
 			glog.Errorf("failed to read from original file during truncate")
@@ -277,13 +301,13 @@ func (df *DiskFile) Truncate(off int64) error {
 	}
 
 	// Close original file handles.
-	if df.readFile != nil {
-		C.hdfsCloseFile(df.fs, df.readFile)
-		df.readFile = nil
+	if readFile != nil {
+		C.hdfsCloseFile(df.fs, readFile)
+		readFile = nil
 	}
-	if df.writeFile != nil {
-		C.hdfsCloseFile(df.fs, df.writeFile)
-		df.writeFile = nil
+	if writeFile != nil {
+		C.hdfsCloseFile(df.fs, writeFile)
+		writeFile = nil
 	}
 
 	// Delete the original file.
@@ -303,13 +327,13 @@ func (df *DiskFile) Truncate(off int64) error {
 	// Reopen the file for reading and writing.
 	cOrigPath2 := C.CString(df.fullFilePath)
 	defer C.free(unsafe.Pointer(cOrigPath2))
-	df.readFile = C.hdfsOpenFile(df.fs, cOrigPath2, C.O_RDONLY, 0, 0, 0)
-	if df.readFile == nil {
+	readFile = C.hdfsOpenFile(df.fs, cOrigPath2, C.O_RDONLY, 0, 0, 0)
+	if readFile == nil {
 		glog.Errorf("failed to reopen file for reading after truncate")
 		return fmt.Errorf("failed to reopen file for reading after truncate")
 	}
-	df.writeFile = C.hdfsOpenFile(df.fs, cOrigPath2, C.O_WRONLY, 0, 0, 0)
-	if df.writeFile == nil {
+	writeFile = C.hdfsOpenFile(df.fs, cOrigPath2, C.O_WRONLY, 0, 0, 0)
+	if writeFile == nil {
 		glog.Errorf("failed to reopen file for writing after truncate")
 		return fmt.Errorf("failed to reopen file for writing after truncate")
 	}
@@ -324,39 +348,8 @@ func (df *DiskFile) Truncate(off int64) error {
 }
 
 func (df *DiskFile) Close() error {
-	if df.writeFile == nil && df.readFile == nil {
-		return nil
-	}
-	err := df.Sync()
-	var err1 error
-	if df.readFile != nil {
-		ret := C.hdfsCloseFile(df.fs, df.readFile)
-		if ret != 0 {
-			glog.Errorf("failed to close read file")
-			err1 = fmt.Errorf("failed to close read file")
-		}
-		df.readFile = nil
-	}
-	if df.writeFile != nil {
-		ret := C.hdfsCloseFile(df.fs, df.writeFile)
-		if ret != 0 {
-			glog.Errorf("failed to close write file")
-			err1 = fmt.Errorf("failed to close write file")
-		}
-		df.writeFile = nil
-	}
-	ret := C.hdfsDisconnect(df.fs)
-	if ret != 0 {
-		if err1 == nil {
-			glog.Errorf("failed to disconnect HDFS")
-			err1 = fmt.Errorf("failed to disconnect HDFS")
-		}
-	}
-	df.fs = nil
-	if err != nil {
-		return err
-	}
-	return err1
+	glog.Errorf("Attempt to force close HDFS file. Not doing anything.")
+	return nil
 }
 
 func (df *DiskFile) GetStat() (datSize int64, modTime time.Time, err error) {
@@ -371,26 +364,12 @@ func (df *DiskFile) Name() string {
 }
 
 func (df *DiskFile) Sync() error {
-	if df.writeFile == nil {
-		return os.ErrClosed
-	}
-	if isMac {
-		return nil
-	}
-	return df.FileSync()
+	glog.Errorf("Attempt to force sync HDFS file. Not doing anything.")
+	return nil
 }
 
 // FileSync wraps the hdfs flush operations.
 func (df *DiskFile) FileSync() error {
-	ret := C.hdfsFlush(df.fs, df.writeFile)
-	if ret != 0 {
-		glog.Errorf("hdfsFlush failed")
-		return fmt.Errorf("hdfsFlush failed")
-	}
-	ret = C.hdfsHSync(df.fs, df.writeFile)
-	if ret != 0 {
-		glog.Errorf("hdfsHSync failed")
-		return fmt.Errorf("hdfsHSync failed")
-	}
+	glog.Errorf("Attempt to force sync HDFS file. Not doing anything.")
 	return nil
 }
