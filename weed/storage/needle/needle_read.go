@@ -3,12 +3,14 @@ package needle
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os/exec"
+
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/stats"
 	"github.com/seaweedfs/seaweedfs/weed/storage/backend"
 	. "github.com/seaweedfs/seaweedfs/weed/storage/types"
 	"github.com/seaweedfs/seaweedfs/weed/util"
-	"io"
 )
 
 const (
@@ -36,6 +38,17 @@ func ReadNeedleBlob(r backend.BackendStorageFile, offset int64, size Size, versi
 	dataSlice = make([]byte, int(dataSize))
 
 	var n int
+
+	// ============== Declare IO ===================
+	cmd := exec.Command("/home/ubuntu/decio/hdfs/hadoop-hdfs-project/hadoop-hdfs-native-client/target/main/native/libhdfspp/examples/cc/declarative-io/declare", "gc-read", r.Name(), fmt.Sprintf("%d", offset), fmt.Sprintf("%d", len(dataSlice)), "2025:02:12 01:42:00")
+
+	_, err = cmd.CombinedOutput()
+	if err != nil {
+		glog.Errorf("Error executing read declaration command")
+	}
+	glog.Infof("Garbage collection read declared")
+	// ============== Declare IO ===================
+
 	n, err = r.ReadAt(dataSlice, offset)
 	if err != nil && int64(n) == dataSize {
 		err = nil
