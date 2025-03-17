@@ -2,6 +2,8 @@ module github.com/seaweedfs/seaweedfs
 
 go 1.22.0
 
+toolchain go1.24.1
+
 require (
 	cloud.google.com/go v0.115.1 // indirect
 	cloud.google.com/go/pubsub v1.43.0
@@ -102,13 +104,13 @@ require (
 	gocloud.dev v0.40.0
 	gocloud.dev/pubsub/natspubsub v0.39.0
 	gocloud.dev/pubsub/rabbitpubsub v0.40.0
-	golang.org/x/crypto v0.28.0 // indirect
+	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	golang.org/x/image v0.21.0
-	golang.org/x/net v0.30.0
+	golang.org/x/net v0.33.0
 	golang.org/x/oauth2 v0.23.0 // indirect
-	golang.org/x/sys v0.26.0
-	golang.org/x/text v0.19.0 // indirect
+	golang.org/x/sys v0.28.0
+	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/tools v0.25.0
 	golang.org/x/xerrors v0.0.0-20240716161551-93cc26a95ae9 // indirect
 	google.golang.org/api v0.199.0
@@ -150,10 +152,10 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/tikv/client-go/v2 v2.0.7
 	github.com/ydb-platform/ydb-go-sdk-auth-environ v0.5.0
-	github.com/ydb-platform/ydb-go-sdk/v3 v3.89.2
+	github.com/ydb-platform/ydb-go-sdk/v3 v3.104.0
 	go.etcd.io/etcd/client/pkg/v3 v3.5.16
 	go.uber.org/atomic v1.11.0
-	golang.org/x/sync v0.8.0
+	golang.org/x/sync v0.10.0
 	google.golang.org/grpc/security/advancedtls v1.0.0
 )
 
@@ -328,7 +330,7 @@ require (
 	github.com/unknwon/goconfig v1.0.0 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/yandex-cloud/go-genproto v0.0.0-20211115083454-9ca41db5ed9e // indirect
-	github.com/ydb-platform/ydb-go-genproto v0.0.0-20241022174402-dd276c7f197b // indirect
+	github.com/ydb-platform/ydb-go-genproto v0.0.0-20241112172322-ea1f63298f77 // indirect
 	github.com/ydb-platform/ydb-go-yc v0.12.1 // indirect
 	github.com/ydb-platform/ydb-go-yc-metadata v0.6.1 // indirect
 	github.com/yunify/qingstor-sdk-go/v3 v3.2.0 // indirect
@@ -348,7 +350,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/mod v0.21.0 // indirect
-	golang.org/x/term v0.25.0 // indirect
+	golang.org/x/term v0.27.0 // indirect
 	golang.org/x/time v0.6.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
