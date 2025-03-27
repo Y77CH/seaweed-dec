@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"time"
 
 	"github.com/seaweedfs/seaweedfs/weed/glog"
 	"github.com/seaweedfs/seaweedfs/weed/stats"
@@ -40,7 +41,10 @@ func ReadNeedleBlob(r backend.BackendStorageFile, offset int64, size Size, versi
 	var n int
 
 	// ============== Declare IO ===================
-	cmd := exec.Command("/home/ubuntu/decio/hdfs/hadoop-hdfs-project/hadoop-hdfs-native-client/target/main/native/libhdfspp/examples/cc/declarative-io/declare", "gc-read", r.Name(), fmt.Sprintf("%d", offset), fmt.Sprintf("%d", len(dataSlice)), "2025:02:12 01:42:00")
+	futureTime := time.Now().Add(10 * time.Minute)
+	formattedTime := futureTime.Format("2006:01:02 15:04:05")
+	glog.Infof("Garbage collection read declaring")
+	cmd := exec.Command("/home/ubuntu/decio/hdfs/hadoop-hdfs-project/hadoop-hdfs-native-client/target/main/native/libhdfspp/examples/cc/declarative-io/declare", "gc-read", r.Name(), fmt.Sprintf("%d", offset), fmt.Sprintf("%d", len(dataSlice)), formattedTime)
 
 	_, err = cmd.CombinedOutput()
 	if err != nil {
