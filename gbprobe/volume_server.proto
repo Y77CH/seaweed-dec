@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package volume_server_pb;
+option go_package = "github.com/seaweedfs/seaweedfs/weed/pb/volume_server_pb";
+
+//////////////////////////////////////////////////
+
+service VolumeServer {
+    rpc VacuumVolumeCheck (VacuumVolumeCheckRequest) returns (VacuumVolumeCheckResponse) {
+    }
+    rpc VacuumVolumeCompact (VacuumVolumeCompactRequest) returns (stream VacuumVolumeCompactResponse) {
+    }
+    rpc VacuumVolumeCommit (VacuumVolumeCommitRequest) returns (VacuumVolumeCommitResponse) {
+    }
+    rpc VacuumVolumeCleanup (VacuumVolumeCleanupRequest) returns (VacuumVolumeCleanupResponse) {
+    }
+}
+
+//////////////////////////////////////////////////
+
+message Empty {
+}
+
+message VacuumVolumeCheckRequest {
+    uint32 volume_id = 1;
+}
+message VacuumVolumeCheckResponse {
+    double garbage_ratio = 1;
+}
+
+message VacuumVolumeCompactRequest {
+    uint32 volume_id = 1;
+    int64 preallocate = 2;
+}
+message VacuumVolumeCompactResponse {
+    int64 processed_bytes = 1;
+    float load_avg_1m = 2;
+}
+
+message VacuumVolumeCommitRequest {
+    uint32 volume_id = 1;
+}
+message VacuumVolumeCommitResponse {
+    bool is_read_only = 1;
+    uint64 volume_size = 2;
+}
+
+message VacuumVolumeCleanupRequest {
+    uint32 volume_id = 1;
+}
+message VacuumVolumeCleanupResponse {
+}
