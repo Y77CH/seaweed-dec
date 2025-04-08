@@ -38,7 +38,7 @@ func NewDiskFile(f *os.File) *DiskFile {
 	fullPath := f.Name()
 
 	// Connect to HDFS.
-	namenode := C.CString("hdfs://localhost:9000")
+	namenode := C.CString("hdfs://h0.decobjstore.hearty.narwhal.pdl.cmu.edu:9000")
 	defer C.free(unsafe.Pointer(namenode))
 	fs := C.hdfsConnect(namenode, 0)
 	if fs == nil {
@@ -128,7 +128,8 @@ func (df *DiskFile) ReadAt(p []byte, off int64) (n int, err error) {
 }
 
 func (df *DiskFile) WriteAt(p []byte, off int64) (n int, err error) {
-	glog.Infof("WriteAt requested for %x at offset %d", p, off)
+	//glog.Infof("WriteAt requested for %x at offset %d", p, off)
+	glog.Infof("WriteAt requested for length %d at offset %d", len(p), off)
 	// Ensure the write offset is 8 bytes aligned.
 	if off%8 != 0 {
 		return 0, fmt.Errorf("WriteAt offset %d is not 8 bytes aligned", off)

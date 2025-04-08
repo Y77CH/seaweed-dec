@@ -1,5 +1,5 @@
-export HADOOP_HOME="/home/ubuntu/decio/hdfs/hadoop-dist/target/hadoop-3.3.9-SNAPSHOT/"
-export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
+#export HADOOP_HOME="/home/ubuntu/decio/hdfs/hadoop-dist/target/hadoop-3.3.9-SNAPSHOT/"
+#export HADOOP_CONF_DIR=$HADOOP_HOME/etc/hadoop
 export HADOOP_YARN_HOME=$HADOOP_HOME
 export HADOOP_COMMON_HOME=$HADOOP_HOME
 export HADOOP_HDFS_HOME=$HADOOP_HOME
@@ -16,4 +16,4 @@ export CLASSPATH=$(hadoop classpath --glob)
 export CGO_LDFLAGS="-L$LIBHDFS_DIR -lhdfs"
 export CGO_CFLAGS="-I$HADOOP_HOME/include"
 # set for declaration executable
-export DEC_EXEC="/home/ubuntu/decio/hdfs/hadoop-hdfs-project/hadoop-hdfs-native-client/target/main/native/libhdfspp/examples/cc/declarative-io"
+export DEC_EXEC="/users/yiweiche/dec-hdfs/hdfs-declarative-io/hadoop-hdfs-project/hadoop-hdfs-native-client/target/main/native/libhdfspp/examples/cc/declarative-io"
