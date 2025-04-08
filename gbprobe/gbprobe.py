@@ -4,6 +4,8 @@ import logging
 import volume_server_pb2
 import volume_server_pb2_grpc
 from typing import Optional
+import requests
+import time
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -127,19 +129,36 @@ class VolumeServerClient:
             raise
 
 
-def main():
-    server_address = '172.31.4.65:18080'
-    
-    volume_id = 1
-    
-    try:
-        with VolumeServerClient(server_address) as client:
-            garbage_ratio = client.vacuum_volume_check(volume_id)
-            logging.info(f"Volume {volume_id} garbage ratio: {garbage_ratio}")
-    
-    except Exception as e:
-        logging.error(f"Error during volume vacuum: {e}")
 
+def main():
+    ip_addr = '10.111.6.13'
+    server_address = ip_addr+':18081'
+    status_url = "http://"+ip_addr+':8081'+"/status"
+
+    with VolumeServerClient(server_address) as client:
+        while True:
+            try:
+                # Get service status from the HTTP API.
+                response = requests.get(status_url)
+                response.raise_for_status()
+                data = response.json()
+
+                # Extract the volume list.
+                volumes = data.get("Volumes", [])
+                if not volumes:
+                    logging.info("No volumes found in the service status.")
+                else:
+                    for volume in volumes:
+                        volume_id = volume.get("Id")
+                        if volume_id is None:
+                            logging.warning("Found a volume without an Id.")
+                            continue
+                        garbage_ratio = client.vacuum_volume_check(volume_id)
+                        logging.info(f"Volume {volume_id} garbage ratio: {garbage_ratio}")
+            except Exception as e:
+                logging.error(f"Error during processing: {e}")
+            # Wait for one second before the next probe.
+            time.sleep(1)
 
 if __name__ == '__main__':
     main()
