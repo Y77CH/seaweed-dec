@@ -13,7 +13,7 @@ logging.basicConfig(
     format='%(asctime)s %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("benchmark.log", mode="a")
+        logging.FileHandler("garbage.log", mode="a")
     ]
 )
 
