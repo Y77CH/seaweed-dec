@@ -52,12 +52,16 @@ def put_object(master_addr, object_id, size_bytes):
         # Upload file to the assigned location
         upload_url = f"http://{public_url}/{fid}"
         print(f"Uploading file to {upload_url}")
-        
+        start_time = time.time()
         with open(file_path, 'rb') as file:
             upload_response = requests.post(
-                upload_url, 
+                upload_url,
                 files={'file': file}
             )
+        end_time = time.time()
+        elapsed = end_time - start_time
+        throughput = size_bytes / elapsed if elapsed > 0 else 0
+        print(f"PUT throughput: {throughput:.2f} bytes/sec")
         
         print(f"PUT response: {upload_response.json()}")
         
@@ -92,12 +96,17 @@ def get_object(master_addr, object_id, range_start=None, range_end=None):
             headers['Range'] = f'bytes={range_start}-{range_end}'
         
         print(f"Sending GET request to {url}")
+        start_time = time.time()
         response = requests.get(url, headers=headers)
+        end_time = time.time()
+        elapsed = end_time - start_time
         
         if response.status_code == 200 or response.status_code == 206:
             content_length = len(response.content)
             print(f"GET operation for {object_id} completed successfully")
             print(f"Received {content_length} bytes of data")
+            throughput = content_length / elapsed if elapsed > 0 else 0
+            print(f"GET throughput: {throughput:.2f} bytes/sec")
             
             # Save the response to a file if needed for inspection or verification
             if range_start is not None and range_end is not None:
