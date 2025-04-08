@@ -71,7 +71,7 @@ def put_object(master_addr, object_id, size_bytes):
         end_time = time.time()
         elapsed = end_time - start_time
         throughput = size_bytes / elapsed if elapsed > 0 else 0
-        logging.info(f"PUT throughput for {object_id}: {throughput:.2f} bytes/sec")
+        logging.info(f"PUT,{object_id},{size_bytes},{elapsed},{throughput:.2f}") # bytes/second
         
         logging.debug(f"PUT response: {upload_response.json()}")
         
@@ -116,7 +116,7 @@ def get_object(master_addr, object_id, range_start=None, range_end=None):
             logging.debug(f"GET operation for {object_id} completed successfully")
             logging.debug(f"Received {content_length} bytes of data")
             throughput = content_length / elapsed if elapsed > 0 else 0
-            logging.info(f"GET throughput for {object_id}: {throughput:.2f} bytes/sec")
+            logging.info(f"GET,{object_id},{size_bytes},{elapsed},{throughput:.2f}") # bytes/second
             
             # Save the response to a file if needed for inspection or verification
             if range_start is not None and range_end is not None:
