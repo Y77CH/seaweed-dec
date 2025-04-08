@@ -236,7 +236,7 @@ def delete_object(master_addr, object_id):
 
 def execute_trace(trace_file, master_addr):
     """Execute operations from trace file with timing."""
-    start_time = None
+    #start_time = None
     
     print(f"Reading trace file: {trace_file}")
     with open(trace_file, 'r') as f:
@@ -250,23 +250,23 @@ def execute_trace(trace_file, master_addr):
             print(f"Invalid trace line: {line}")
             continue
         
-        timestamp_ms = int(parts[0])
+        #timestamp_ms = int(parts[0])
         operation = parts[1]
         object_id = parts[2]
         
         # Set start time on first operation
-        if start_time is None:
-            start_time = time.time() * 1000 - timestamp_ms
-            print(f"Setting start time reference point at {timestamp_ms}ms")
+        #if start_time is None:
+        #    start_time = time.time() * 1000 - timestamp_ms
+        #    print(f"Setting start time reference point at {timestamp_ms}ms")
         
         # Calculate and wait for the target time
-        target_time = start_time + timestamp_ms
-        current_time = time.time() * 1000
-        wait_time = max(0, (target_time - current_time) / 1000)  # Convert to seconds
+        #target_time = start_time + timestamp_ms
+        #current_time = time.time() * 1000
+        #wait_time = max(0, (target_time - current_time) / 1000)  # Convert to seconds
         
-        if wait_time > 0:
-            print(f"Waiting {wait_time:.3f} seconds until timestamp {timestamp_ms}ms")
-            time.sleep(wait_time)
+        #if wait_time > 0:
+        #    print(f"Waiting {wait_time:.3f} seconds until timestamp {timestamp_ms}ms")
+        #    time.sleep(wait_time)
         
         # Execute operation based on type
         if operation == "REST.PUT.OBJECT":
