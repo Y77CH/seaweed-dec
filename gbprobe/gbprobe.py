@@ -8,7 +8,14 @@ import requests
 import time
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("benchmark.log", mode="a")
+    ]
+)
 
 class VolumeServerClient:
     """Client for interacting with the VolumeServer gRPC service."""
@@ -148,13 +155,16 @@ def main():
                 if not volumes:
                     logging.info("No volumes found in the service status.")
                 else:
+                    garbage_ratios = {}
                     for volume in volumes:
                         volume_id = volume.get("Id")
                         if volume_id is None:
                             logging.warning("Found a volume without an Id.")
                             continue
                         garbage_ratio = client.vacuum_volume_check(volume_id)
-                        logging.info(f"Volume {volume_id} garbage ratio: {garbage_ratio}")
+                        garbage_ratios[volume_id] = garbage_ratio
+                    logging.info(f"Volumes: {garbage_ratios}")
+
             except Exception as e:
                 logging.error(f"Error during processing: {e}")
             # Wait for one second before the next probe.
