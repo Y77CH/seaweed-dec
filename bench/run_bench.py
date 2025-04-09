@@ -153,6 +153,8 @@ def delete_object(master_addr, object_id):
             # Remove mapping after successful deletion
             del object_mappings[object_id]
             logging.debug(f"Removed mapping for object {object_id}")
+        elif response.status_code == 202:
+            logging.debug(f"DELETE operation for {object_id} gets 202")
         else:
             logging.error(f"DELETE operation for {object_id} failed with status code {response.status_code}. Response: {response.text}")
     
