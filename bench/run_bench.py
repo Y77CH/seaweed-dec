@@ -128,8 +128,7 @@ def get_object(master_addr, object_id, range_start=None, range_end=None):
                 f.write(response.content)
             logging.debug(f"Saved response to {output_path}")
         else:
-            logging.error(f"GET operation failed with status code {response.status_code}")
-            logging.error(f"Response: {response.text}")
+            logging.error(f"GET operation for {object_id} failed with status code {response.status_code}. Response: {response.text}")
     
     except Exception as e:
         logging.error(f"Error during GET operation: {e}")
@@ -155,8 +154,7 @@ def delete_object(master_addr, object_id):
             del object_mappings[object_id]
             logging.debug(f"Removed mapping for object {object_id}")
         else:
-            logging.error(f"DELETE operation failed with status code {response.status_code}")
-            logging.error(f"Response: {response.text}")
+            logging.error(f"DELETE operation for {object_id} failed with status code {response.status_code}. Response: {response.text}")
     
     except Exception as e:
         logging.error(f"Error during DELETE operation: {e}")
