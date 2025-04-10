@@ -20,6 +20,8 @@ Path("./temp").mkdir(exist_ok=True)
 
 # Global dictionary to store object_id -> (fid, public_url) mappings
 object_mappings = {}
+# Global dictionary to store pre-created file paths for PUT operations
+prepared_files = {}
 
 def create_random_file(file_path, size_bytes):
     """Create a file with random data of the specified size."""
@@ -35,13 +37,41 @@ def create_random_file(file_path, size_bytes):
     
     logging.debug(f"Created temporary file {file_path} of size {size_bytes} bytes")
 
+def pre_create_put_files(trace_file):
+    """Scan the trace file and pre-create files for all PUT operations."""
+    logging.debug(f"Scanning trace file for PUT operations: {trace_file}")
+    put_operations = {}
+    
+    with open(trace_file, 'r') as f:
+        lines = f.readlines()
+    
+    for line in lines:
+        parts = line.strip().split()
+        if len(parts) < 3:
+            continue
+        operation = parts[1]
+        if operation == "REST.PUT.OBJECT":
+            object_id = parts[2]
+            if len(parts) >= 4:
+                size_bytes = int(parts[3])
+                put_operations[object_id] = size_bytes
+            else:
+                logging.error(f"Missing size for PUT operation in line: {line}")
+    
+    for object_id, size_bytes in put_operations.items():
+        file_path = f"./temp/{object_id}"
+        create_random_file(file_path, size_bytes)
+        prepared_files[object_id] = file_path
+        logging.debug(f"Pre-created file for object {object_id} at {file_path} with size {size_bytes}")
+
 def put_object(master_addr, object_id, size_bytes):
-    """Execute PUT operation."""
+    """Execute PUT operation using the pre-created file."""
     logging.debug(f"Executing PUT for object {object_id} with size {size_bytes}")
     
-    # Create temp file
-    file_path = f"./temp/{object_id}"
-    create_random_file(file_path, size_bytes)
+    file_path = prepared_files.get(object_id)
+    if file_path is None or not os.path.exists(file_path):
+        logging.error(f"Pre-created file for object {object_id} not found. Skipping PUT operation.")
+        return
     
     try:
         # Get assignment from master server
@@ -71,7 +101,7 @@ def put_object(master_addr, object_id, size_bytes):
         end_time = time.time()
         elapsed = end_time - start_time
         throughput = size_bytes / elapsed if elapsed > 0 else 0
-        logging.info(f"PUT,{object_id},{size_bytes},{elapsed},{throughput:.2f}") # bytes/second
+        logging.info(f"PUT,{object_id},{size_bytes},{elapsed},{throughput:.2f}")  # bytes/second
         
         logging.debug(f"PUT response: {upload_response.json()}")
         
@@ -83,10 +113,12 @@ def put_object(master_addr, object_id, size_bytes):
         logging.error(f"Error during PUT operation: {e}")
     
     finally:
-        # Clean up temp file
+        # Clean up the pre-created file after upload
         if os.path.exists(file_path):
             os.remove(file_path)
-            logging.debug(f"Cleaned up temporary file {file_path}")
+            logging.debug(f"Cleaned up pre-created file {file_path}")
+            if object_id in prepared_files:
+                del prepared_files[object_id]
 
 def get_object(master_addr, object_id, range_start=None, range_end=None):
     """Execute GET operation."""
@@ -116,9 +148,8 @@ def get_object(master_addr, object_id, range_start=None, range_end=None):
             logging.debug(f"GET operation for {object_id} completed successfully")
             logging.debug(f"Received {content_length} bytes of data")
             throughput = content_length / elapsed if elapsed > 0 else 0
-            logging.info(f"GET,{object_id},{content_length},{elapsed},{throughput:.2f}") # bytes/second
+            logging.info(f"GET,{object_id},{content_length},{elapsed},{throughput:.2f}")  # bytes/second
             
-            # Save the response to a file if needed for inspection or verification
             if range_start is not None and range_end is not None:
                 output_path = f"./temp/{object_id}_range_{range_start}_{range_end}"
             else:
@@ -150,7 +181,6 @@ def delete_object(master_addr, object_id):
         
         if response.status_code == 200 or response.status_code == 204:
             logging.debug(f"DELETE operation for {object_id} completed successfully")
-            # Remove mapping after successful deletion
             del object_mappings[object_id]
             logging.debug(f"Removed mapping for object {object_id}")
         elif response.status_code == 202:
@@ -181,21 +211,18 @@ def execute_trace(trace_file, master_addr):
         operation = parts[1]
         object_id = parts[2]
         
-        # Set start time on first operation
         if start_time is None:
             start_time = time.time() * 1000 - timestamp_ms
             logging.debug(f"Setting start time reference point at {timestamp_ms}ms")
         
-        # Calculate and wait for the target time
         target_time = start_time + timestamp_ms
         current_time = time.time() * 1000
-        wait_time = max(0, (target_time - current_time) / 1000)  # Convert to seconds
+        wait_time = max(0, (target_time - current_time) / 1000)
         
         if wait_time > 0:
             logging.debug(f"Waiting {wait_time:.3f} seconds until timestamp {timestamp_ms}ms")
             time.sleep(wait_time)
         
-        # Execute operation based on type
         if operation == "REST.PUT.OBJECT":
             if len(parts) >= 4:
                 size_bytes = int(parts[3])
@@ -225,6 +252,8 @@ def main():
     args = parser.parse_args()
     
     print(f"Starting trace execution from {args.trace_file} with master {args.master}")
+    pre_create_put_files(args.trace_file)
+    print("Data preparation completed")
     execute_trace(args.trace_file, args.master)
     print("Trace execution completed")
 
