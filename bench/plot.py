@@ -55,13 +55,13 @@ def parse_performance_log(log_file):
 
 def parse_garbage_log(log_file):
     """
-    Parse the garbage log file and extract timestamp and average garbage ratio information.
+    Parse the garbage log file and extract timestamp and garbage ratios per volume server.
     
     Args:
         log_file (str): Path to the garbage log file
         
     Returns:
-        pandas.DataFrame: DataFrame containing timestamp and average garbage ratio data
+        pandas.DataFrame: DataFrame containing timestamp and garbage ratios for each volume server
     """
     data = []
     # Pattern matches: timestamp and volumes dictionary
@@ -79,15 +79,12 @@ def parse_garbage_log(log_file):
                     volumes = {}
                     for item in volumes_str.split(', '):
                         key, value = item.split(': ')
-                        volumes[int(key)] = float(value)
+                        volumes[f'vol_{key}'] = float(value)
                     
-                    # Calculate the average garbage ratio
-                    avg_garbage_ratio = sum(volumes.values()) / len(volumes) if volumes else 0
-                    
-                    data.append({
-                        'timestamp': timestamp,
-                        'avg_garbage_ratio': avg_garbage_ratio
-                    })
+                    # Build the row with the timestamp and the garbage ratios per volume server
+                    row = {'timestamp': timestamp}
+                    row.update(volumes)
+                    data.append(row)
     except FileNotFoundError:
         print(f"Error: File {log_file} not found.")
     except Exception as e:
@@ -124,16 +121,12 @@ def parse_trace_log(log_file):
                         'method': method,
                         'obj_id': obj_id
                     })
-                    
-                    # Debug output for DELETE operations to verify they're being captured
-                    if 'DELETE' in method:
-                        print(f"Found DELETE operation: {line}")
     except FileNotFoundError:
         print(f"Error: File {log_file} not found.")
     except Exception as e:
         print(f"Error processing trace log file: {e}")
     
-    # Print summary to verify we're capturing DELETE operations
+    # Print summary to verify we are capturing DELETE operations
     df = pd.DataFrame(data)
     if not df.empty:
         method_counts = df['method'].value_counts()
@@ -167,11 +160,8 @@ def synchronize_timestamps(performance_df, trace_df):
     
     # Function to convert numeric timestamps to datetime
     def convert_to_datetime(numeric_ts):
-        # Calculate milliseconds difference from the first trace timestamp
         ms_diff = numeric_ts - trace_first_numeric
-        # Convert numpy.int64 to regular integer
         ms_diff_int = int(ms_diff)
-        # Add the difference to the performance log's first timestamp
         return perf_first_timestamp + timedelta(milliseconds=ms_diff_int)
     
     # Apply the conversion function to create a new datetime timestamp column
@@ -197,7 +187,6 @@ def normalize_timestamps(performance_df, garbage_df, trace_df):
     Returns:
         tuple: (performance_df, garbage_df, trace_df) with normalized timestamps
     """
-    # Find the global minimum timestamp across all dataframes
     min_timestamps = []
     
     if not performance_df.empty and 'timestamp' in performance_df.columns:
@@ -213,18 +202,15 @@ def normalize_timestamps(performance_df, garbage_df, trace_df):
         print("Warning: No valid timestamps found to normalize.")
         return performance_df, garbage_df, trace_df
     
-    # Get the global minimum timestamp
     global_min_timestamp = min(min_timestamps)
     print(f"Global minimum timestamp: {global_min_timestamp}")
     
-    # Function to convert timestamp to seconds since start
     def timestamp_to_seconds(ts):
         if isinstance(ts, datetime):
             delta = ts - global_min_timestamp
             return delta.total_seconds()
         return None
     
-    # Normalize timestamps in each DataFrame
     if not performance_df.empty and 'timestamp' in performance_df.columns:
         performance_df['seconds_elapsed'] = performance_df['timestamp'].apply(timestamp_to_seconds)
         print(f"Performance log time range: 0 to {performance_df['seconds_elapsed'].max():.2f} seconds")
@@ -250,27 +236,23 @@ def plot_data_normalized(performance_df, garbage_df, trace_df, output_file):
         trace_df (pandas.DataFrame): DataFrame with trace data (including DELETE events)
         output_file (str): Path to save the output plot file
     """
-    # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
     
-    # Plot throughput if we have performance data
     if not performance_df.empty and 'seconds_elapsed' in performance_df.columns:
-        # Filter data for GET and PUT operations
         get_data = performance_df[performance_df['method'] == 'GET']
         put_data = performance_df[performance_df['method'] == 'PUT']
         
-        # Plot GET throughput
         if not get_data.empty:
-            ax1.plot(get_data['seconds_elapsed'], get_data['throughput'], marker='o', linestyle='-', 
-                    color='blue', label='GET')
-        
-        # Plot PUT throughput
+            ax1.plot(get_data['seconds_elapsed'], get_data['throughput']/1000000, marker='o', linestyle='-', 
+                     color='blue', label='GET')
         if not put_data.empty:
-            ax1.plot(put_data['seconds_elapsed'], put_data['throughput'], marker='s', linestyle='-', 
-                    color='green', label='PUT')
+            ax1.plot(put_data['seconds_elapsed'], put_data['throughput']/1000000, marker='s', linestyle='-', 
+                     color='green', label='PUT')
         
         ax1.set_xlabel('Time (seconds)')
-        ax1.set_ylabel('Throughput')
+        ax1.set_ylabel('Throughput (MB/s)')
+        ax1.set_ylim(0, 100)
+        ax1.set_yticks(np.arange(0, 101, 10))
         ax1.set_title('Throughput over Time by Operation Type')
         ax1.grid(True)
         ax1.legend()
@@ -279,49 +261,42 @@ def plot_data_normalized(performance_df, garbage_df, trace_df, output_file):
                  horizontalalignment='center', verticalalignment='center',
                  transform=ax1.transAxes)
     
-    # Plot garbage ratio if we have garbage data
     if not garbage_df.empty and 'seconds_elapsed' in garbage_df.columns:
-        ax2.plot(garbage_df['seconds_elapsed'], garbage_df['avg_garbage_ratio'], marker='o', color='red', linestyle='-')
-        ax2.set_xlabel('Time (seconds)')
-        ax2.set_ylabel('Average Garbage Ratio')
-        ax2.set_title('Average Garbage Ratio over Time with DELETE Events')
-        ax2.grid(True)
+        volume_columns = [col for col in garbage_df.columns if col not in ('timestamp', 'seconds_elapsed')]
+        for col in volume_columns:
+            ax2.plot(garbage_df['seconds_elapsed'], garbage_df[col], marker='o', linestyle='-', label=col)
         
-        # Add vertical lines for DELETE events if we have trace data
-        # if not trace_df.empty and 'seconds_elapsed' in trace_df.columns:
-            # Filter for DELETE events - use case-insensitive search
-            # delete_events = trace_df[trace_df['method'].str.contains('DELETE', case=False)]
-            
-            # if not delete_events.empty:
-            #     print(f"Plotting {len(delete_events)} DELETE events on the garbage ratio graph")
-            #     for idx, event in delete_events.iterrows():
-            #         ax2.axvline(x=event['seconds_elapsed'], color='purple', linestyle='--', alpha=0.7)
-                
-            #     # Add a label for DELETE events in the legend
-            #     ax2.plot([], [], color='purple', linestyle='--', label='DELETE Events')
-            #     ax2.legend()
-            # else:
-            #     print("No DELETE events found to plot")
+        # Add vertical lines for DELETE events
+        if not trace_df.empty and 'seconds_elapsed' in trace_df.columns:
+            delete_events = trace_df[trace_df['method'].str.contains('DELETE', case=False)]
+            if not delete_events.empty:
+                for i, ts in enumerate(delete_events['seconds_elapsed']):
+                    if i == 0:
+                        ax2.axvline(x=ts, color='purple', linestyle='--', alpha=0.7, label='DELETE Event')
+                    else:
+                        ax2.axvline(x=ts, color='purple', linestyle='--', alpha=0.7)
+                ax2.legend()
+        
+        ax2.set_xlabel('Time (seconds)')
+        ax2.set_ylabel('Garbage Ratio')
+        ax2.set_ylim(0, 0.01)
+        ax2.set_yticks(np.arange(0, 0.011, 0.001))
+        ax2.set_title('Garbage Ratio over Time per Volume Server with DELETE Events')
+        ax2.grid(True)
     else:
         ax2.text(0.5, 0.5, 'No valid garbage data found',
                  horizontalalignment='center', verticalalignment='center',
                  transform=ax2.transAxes)
     
-    # Set x-axis to start at 0
     ax1.set_xlim(left=0)
     ax2.set_xlim(left=0)
     
-    # Adjust layout and save
     plt.tight_layout()
     plt.savefig(output_file)
     print(f"Plots saved to {output_file}")
-    
-    # Show the plot
     plt.show()
 
 def main():
-    """Main function to handle command-line arguments and process log files"""
-    # Set up argument parser
     parser = argparse.ArgumentParser(description='Process and plot log files')
     parser.add_argument('--perf_log', required=True, help='Path to performance log file')
     parser.add_argument('--garbage_log', required=True, help='Path to garbage log file')
@@ -330,7 +305,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Parse log files
     performance_df = parse_performance_log(args.perf_log)
     garbage_df = parse_garbage_log(args.garbage_log)
     trace_df = parse_trace_log(args.trace_log)
@@ -339,14 +313,11 @@ def main():
         print("Error: No valid data found in log files.")
         return
     
-    # Synchronize timestamps between performance and trace logs
     if not performance_df.empty and not trace_df.empty:
         trace_df = synchronize_timestamps(performance_df, trace_df)
     
-    # Normalize timestamps to start at zero
     performance_df, garbage_df, trace_df = normalize_timestamps(performance_df, garbage_df, trace_df)
     
-    # Create and save plots with normalized time
     plot_data_normalized(performance_df, garbage_df, trace_df, args.output)
 
 if __name__ == "__main__":
