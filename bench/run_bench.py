@@ -5,6 +5,7 @@ import requests
 import argparse
 from pathlib import Path
 import logging
+import threading
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -15,7 +16,7 @@ logging.basicConfig(
     ]
 )
 
-# Create temp directory if it doesn't exist
+# Create temp directory if it does not exist
 Path("./temp").mkdir(exist_ok=True)
 
 # Global dictionary to store object_id -> (fid, public_url) mappings
@@ -101,8 +102,7 @@ def put_object(master_addr, object_id, size_bytes):
         end_time = time.time()
         elapsed = end_time - start_time
         throughput = size_bytes / elapsed if elapsed > 0 else 0
-        logging.info(f"PUT,{object_id},{size_bytes},{elapsed},{throughput:.2f}")  # bytes/second
-        
+        logging.info(f"PUT,{object_id},{size_bytes},{elapsed},{throughput:.2f}")
         logging.debug(f"PUT response: {upload_response.json()}")
         
         # Store the mapping for later GET and DELETE operations
@@ -148,7 +148,7 @@ def get_object(master_addr, object_id, range_start=None, range_end=None):
             logging.debug(f"GET operation for {object_id} completed successfully")
             logging.debug(f"Received {content_length} bytes of data")
             throughput = content_length / elapsed if elapsed > 0 else 0
-            logging.info(f"GET,{object_id},{content_length},{elapsed},{throughput:.2f}")  # bytes/second
+            logging.info(f"GET,{object_id},{content_length},{elapsed},{throughput:.2f}")
             
             if range_start is not None and range_end is not None:
                 output_path = f"./temp/{object_id}_range_{range_start}_{range_end}"
@@ -184,7 +184,7 @@ def delete_object(master_addr, object_id):
             del object_mappings[object_id]
             logging.debug(f"Removed mapping for object {object_id}")
         elif response.status_code == 202:
-            logging.debug(f"DELETE operation for {object_id} gets 202")
+            logging.debug(f"DELETE operation for {object_id} returns 202")
         else:
             logging.error(f"DELETE operation for {object_id} failed with status code {response.status_code}. Response: {response.text}")
     
@@ -192,7 +192,8 @@ def delete_object(master_addr, object_id):
         logging.error(f"Error during DELETE operation: {e}")
 
 def execute_trace(trace_file, master_addr):
-    """Execute operations from trace file with timing."""
+    """Execute operations from trace file with timing in separate threads."""
+    threads = []
     start_time = None
     
     logging.debug(f"Reading trace file: {trace_file}")
@@ -226,7 +227,9 @@ def execute_trace(trace_file, master_addr):
         if operation == "REST.PUT.OBJECT":
             if len(parts) >= 4:
                 size_bytes = int(parts[3])
-                put_object(master_addr, object_id, size_bytes)
+                thread = threading.Thread(target=put_object, args=(master_addr, object_id, size_bytes))
+                thread.start()
+                threads.append(thread)
             else:
                 logging.error(f"Missing size for PUT operation: {line}")
         
@@ -234,15 +237,24 @@ def execute_trace(trace_file, master_addr):
             if len(parts) >= 6:
                 range_start = int(parts[4])
                 range_end = int(parts[5])
-                get_object(master_addr, object_id, range_start, range_end)
+                thread = threading.Thread(target=get_object, args=(master_addr, object_id, range_start, range_end))
+                thread.start()
+                threads.append(thread)
             else:
-                get_object(master_addr, object_id)
+                thread = threading.Thread(target=get_object, args=(master_addr, object_id))
+                thread.start()
+                threads.append(thread)
         
         elif operation == "REST.DELETE.OBJECT":
-            delete_object(master_addr, object_id)
+            thread = threading.Thread(target=delete_object, args=(master_addr, object_id))
+            thread.start()
+            threads.append(thread)
         
         else:
             logging.error(f"Unknown operation: {operation}")
+    
+    for thread in threads:
+        thread.join()
 
 def main():
     parser = argparse.ArgumentParser(description='Execute operations from trace file.')
