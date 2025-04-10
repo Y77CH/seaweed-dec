@@ -225,35 +225,51 @@ def normalize_timestamps(performance_df, garbage_df, trace_df):
     
     return performance_df, garbage_df, trace_df
 
-def plot_data_normalized(performance_df, garbage_df, trace_df, output_file):
+def plot_data_normalized(performance_df, garbage_df, trace_df, output_file, bin_size):
     """
     Create and save plots for throughput and garbage ratio over time, 
-    with time normalized to start at zero.
+    with time normalized to start at zero and throughput averaged every k seconds.
     
     Args:
         performance_df (pandas.DataFrame): DataFrame with performance data
         garbage_df (pandas.DataFrame): DataFrame with garbage ratio data
         trace_df (pandas.DataFrame): DataFrame with trace data (including DELETE events)
         output_file (str): Path to save the output plot file
+        bin_size (float): Time interval in seconds to average throughput values
     """
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
     
     if not performance_df.empty and 'seconds_elapsed' in performance_df.columns:
-        get_data = performance_df[performance_df['method'] == 'GET']
-        put_data = performance_df[performance_df['method'] == 'PUT']
+        # Create bins and average throughput for each bin for GET and PUT separately.
+        x_max = performance_df['seconds_elapsed'].max()
+        bins = np.arange(0, x_max + bin_size, bin_size)
         
+        # Process GET operations
+        get_data = performance_df[performance_df['method'] == 'GET']
         if not get_data.empty:
-            ax1.plot(get_data['seconds_elapsed'], get_data['throughput']/1000000, marker='o', linestyle='-', 
+            get_data = get_data.copy()
+            get_data['bin'] = pd.cut(get_data['seconds_elapsed'], bins=bins, right=False, include_lowest=True)
+            get_grouped = get_data.groupby('bin').agg({'throughput': 'mean'}).reset_index()
+            # Get bin centers from the intervals
+            get_grouped['bin_center'] = get_grouped['bin'].apply(lambda x: (x.left + x.right) / 2.0)
+            ax1.plot(get_grouped['bin_center'], get_grouped['throughput']/1000000, marker='o', linestyle='-', 
                      color='blue', label='GET')
+        
+        # Process PUT operations
+        put_data = performance_df[performance_df['method'] == 'PUT']
         if not put_data.empty:
-            ax1.plot(put_data['seconds_elapsed'], put_data['throughput']/1000000, marker='s', linestyle='-', 
+            put_data = put_data.copy()
+            put_data['bin'] = pd.cut(put_data['seconds_elapsed'], bins=bins, right=False, include_lowest=True)
+            put_grouped = put_data.groupby('bin').agg({'throughput': 'mean'}).reset_index()
+            put_grouped['bin_center'] = put_grouped['bin'].apply(lambda x: (x.left + x.right) / 2.0)
+            ax1.plot(put_grouped['bin_center'], put_grouped['throughput']/1000000, marker='s', linestyle='-', 
                      color='green', label='PUT')
         
         ax1.set_xlabel('Time (seconds)')
         ax1.set_ylabel('Throughput (MB/s)')
         ax1.set_ylim(0, 100)
         ax1.set_yticks(np.arange(0, 101, 10))
-        ax1.set_title('Throughput over Time by Operation Type')
+        ax1.set_title('Throughput over Time by Operation Type (Averaged every {:.1f} seconds)'.format(bin_size))
         ax1.grid(True)
         ax1.legend()
     else:
@@ -288,9 +304,8 @@ def plot_data_normalized(performance_df, garbage_df, trace_df, output_file):
                  horizontalalignment='center', verticalalignment='center',
                  transform=ax2.transAxes)
     
-    # Set the x-axis for both plots to the throughput range if available
+    # Set the x-axis for both plots to be the same
     if not performance_df.empty and 'seconds_elapsed' in performance_df.columns:
-        x_max = performance_df['seconds_elapsed'].max()
         ax1.set_xlim(0, x_max)
         ax2.set_xlim(0, x_max)
     else:
@@ -308,6 +323,7 @@ def main():
     parser.add_argument('--garbage_log', required=True, help='Path to garbage log file')
     parser.add_argument('--trace_log', required=True, help='Path to trace log file')
     parser.add_argument('--output', default='log_analysis_plots.png', help='Output plot file name')
+    parser.add_argument('--bin_size', type=float, default=10, help='Bin size in seconds for throughput averaging')
     
     args = parser.parse_args()
     
@@ -324,7 +340,7 @@ def main():
     
     performance_df, garbage_df, trace_df = normalize_timestamps(performance_df, garbage_df, trace_df)
     
-    plot_data_normalized(performance_df, garbage_df, trace_df, args.output)
+    plot_data_normalized(performance_df, garbage_df, trace_df, args.output, args.bin_size)
 
 if __name__ == "__main__":
     main()
