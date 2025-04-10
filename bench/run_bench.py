@@ -7,8 +7,8 @@ from pathlib import Path
 import logging
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(message)s',
+    level=logging.DEBUG,
+    format='%(levelname)s %(asctime)s %(message)s',
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler("benchmark.log", mode="a")
