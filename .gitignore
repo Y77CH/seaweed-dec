@@ -103,3 +103,8 @@ docker/weed_sub_record
 # python related
 gbprobe/venv/
 gbprobe/__pycache__
+
+# benchmark results
+bench/logs/
+bench/traces/
+bench/results
