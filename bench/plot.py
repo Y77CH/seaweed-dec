@@ -288,8 +288,14 @@ def plot_data_normalized(performance_df, garbage_df, trace_df, output_file):
                  horizontalalignment='center', verticalalignment='center',
                  transform=ax2.transAxes)
     
-    ax1.set_xlim(left=0)
-    ax2.set_xlim(left=0)
+    # Set the x-axis for both plots to the throughput range if available
+    if not performance_df.empty and 'seconds_elapsed' in performance_df.columns:
+        x_max = performance_df['seconds_elapsed'].max()
+        ax1.set_xlim(0, x_max)
+        ax2.set_xlim(0, x_max)
+    else:
+        ax1.set_xlim(left=0)
+        ax2.set_xlim(left=0)
     
     plt.tight_layout()
     plt.savefig(output_file)
