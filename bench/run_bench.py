@@ -3,7 +3,7 @@ import os
 import time
 import requests
 import argparse
-from pathlib import Path
+import io
 import logging
 import threading
 
@@ -16,62 +16,47 @@ logging.basicConfig(
     ]
 )
 
-# Create temp directory if it does not exist
-Path("./temp").mkdir(exist_ok=True)
+# Create temp directory if it does not exist (for GET responses)
+os.makedirs("./temp", exist_ok=True)
 
 # Global dictionary to store object_id -> (fid, public_url) mappings
 object_mappings = {}
-# Global dictionary to store pre-created file paths for PUT operations
-prepared_files = {}
+# Global dictionary to store object_id -> size mapping for PUT operations
+object_sizes = {}
+# Global variable for the largest in-memory buffer for PUT operations
+largest_file_data = None
+largest_put_size = 0
 
-def create_random_file(file_path, size_bytes):
-    """Create a file with random data of the specified size."""
-    with open(file_path, 'wb') as f:
-        # Write in chunks to handle large files efficiently
-        chunk_size = min(1024 * 1024, size_bytes)  # 1MB chunks or smaller
-        remaining = size_bytes
-        
-        while remaining > 0:
-            current_chunk = min(chunk_size, remaining)
-            f.write(os.urandom(current_chunk))
-            remaining -= current_chunk
-    
-    logging.debug(f"Created temporary file {file_path} of size {size_bytes} bytes")
-
-def pre_create_put_files(trace_file):
-    """Scan the trace file and pre-create files for all PUT operations."""
+def prepare_memory_buffer(trace_file):
+    """Scan the trace file for PUT operations and pre-create a largest in-memory buffer."""
+    global largest_file_data, largest_put_size, object_sizes
     logging.debug(f"Scanning trace file for PUT operations: {trace_file}")
-    put_operations = {}
-    
+    largest_put_size = 0
     with open(trace_file, 'r') as f:
         lines = f.readlines()
-    
     for line in lines:
         parts = line.strip().split()
         if len(parts) < 3:
             continue
-        operation = parts[1]
-        if operation == "REST.PUT.OBJECT":
+        if parts[1] == "REST.PUT.OBJECT":
             object_id = parts[2]
             if len(parts) >= 4:
                 size_bytes = int(parts[3])
-                put_operations[object_id] = size_bytes
+                object_sizes[object_id] = size_bytes
+                if size_bytes > largest_put_size:
+                    largest_put_size = size_bytes
             else:
                 logging.error(f"Missing size for PUT operation in line: {line}")
-    
-    for object_id, size_bytes in put_operations.items():
-        file_path = f"./temp/{object_id}"
-        create_random_file(file_path, size_bytes)
-        prepared_files[object_id] = file_path
-        logging.debug(f"Pre-created file for object {object_id} at {file_path} with size {size_bytes}")
+    if largest_put_size > 0:
+        largest_file_data = os.urandom(largest_put_size)
+        logging.debug(f"Created in-memory buffer of size {largest_put_size} bytes")
 
 def put_object(master_addr, object_id, size_bytes):
-    """Execute PUT operation using the pre-created file."""
-    logging.debug(f"Executing PUT for object {object_id} with size {size_bytes}")
+    """Execute PUT operation using a slice of the pre-created in-memory buffer."""
+    logging.debug(f"Executing PUT for object {object_id} with size {size_bytes} bytes")
     
-    file_path = prepared_files.get(object_id)
-    if file_path is None or not os.path.exists(file_path):
-        logging.error(f"Pre-created file for object {object_id} not found. Skipping PUT operation.")
+    if object_id not in object_sizes:
+        logging.error(f"No size mapping found for object {object_id}. Skipping PUT operation.")
         return
     
     try:
@@ -90,15 +75,16 @@ def put_object(master_addr, object_id, size_bytes):
         
         logging.debug(f"Received assignment: publicUrl={public_url}, fid={fid}")
         
-        # Upload file to the assigned location
+        # Slice out the needed portion of the in-memory buffer and wrap it in a BytesIO stream
         upload_url = f"http://{public_url}/{fid}"
-        logging.debug(f"Uploading file to {upload_url}")
+        data_slice = largest_file_data[:size_bytes]
+        file_obj = io.BytesIO(data_slice)
+        logging.debug(f"Uploading data slice of size {len(data_slice)} bytes to {upload_url}")
         start_time = time.time()
-        with open(file_path, 'rb') as file:
-            upload_response = requests.post(
-                upload_url,
-                files={'file': file}
-            )
+        upload_response = requests.post(
+            upload_url,
+            files={'file': ('file', file_obj)}
+        )
         end_time = time.time()
         elapsed = end_time - start_time
         throughput = size_bytes / elapsed if elapsed > 0 else 0
@@ -110,22 +96,14 @@ def put_object(master_addr, object_id, size_bytes):
         logging.debug(f"Saved mapping for object {object_id}: fid={fid}, publicUrl={public_url}")
     
     except Exception as e:
-        logging.error(f"Error during PUT operation: {e}")
-    
-    finally:
-        # Clean up the pre-created file after upload
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            logging.debug(f"Cleaned up pre-created file {file_path}")
-            if object_id in prepared_files:
-                del prepared_files[object_id]
+        logging.error(f"Error during PUT operation for object {object_id}: {e}")
 
 def get_object(master_addr, object_id, range_start=None, range_end=None):
     """Execute GET operation."""
     logging.debug(f"Executing GET for object {object_id}")
     
     if object_id not in object_mappings:
-        logging.error(f"Error: No mapping found for object {object_id}. Cannot execute GET operation.")
+        logging.error(f"No mapping found for object {object_id}. Cannot execute GET operation.")
         return
     
     fid, public_url = object_mappings[object_id]
@@ -143,7 +121,7 @@ def get_object(master_addr, object_id, range_start=None, range_end=None):
         end_time = time.time()
         elapsed = end_time - start_time
         
-        if response.status_code == 200 or response.status_code == 206:
+        if response.status_code in (200, 206):
             content_length = len(response.content)
             logging.debug(f"GET operation for {object_id} completed successfully")
             logging.debug(f"Received {content_length} bytes of data")
@@ -169,7 +147,7 @@ def delete_object(master_addr, object_id):
     logging.debug(f"Executing DELETE for object {object_id}")
     
     if object_id not in object_mappings:
-        logging.error(f"Error: No mapping found for object {object_id}. Cannot execute DELETE operation.")
+        logging.error(f"No mapping found for object {object_id}. Cannot execute DELETE operation.")
         return
     
     fid, public_url = object_mappings[object_id]
@@ -179,7 +157,7 @@ def delete_object(master_addr, object_id):
         logging.debug(f"Sending DELETE request to {url}")
         response = requests.delete(url)
         
-        if response.status_code == 200 or response.status_code == 204:
+        if response.status_code in (200, 204):
             logging.debug(f"DELETE operation for {object_id} completed successfully")
             del object_mappings[object_id]
             logging.debug(f"Removed mapping for object {object_id}")
@@ -264,7 +242,7 @@ def main():
     args = parser.parse_args()
     
     print(f"Starting trace execution from {args.trace_file} with master {args.master}")
-    pre_create_put_files(args.trace_file)
+    prepare_memory_buffer(args.trace_file)
     print("Data preparation completed")
     execute_trace(args.trace_file, args.master)
     print("Trace execution completed")
