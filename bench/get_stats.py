@@ -111,8 +111,8 @@ def process_log(filename):
     plt.xlabel("Timestamps (index)")
     plt.ylabel("Operation")
     plt.title("Heat Map of Requests over Time")
-    plt.savefig("heatmap_"+filename)
-    print("Plots saved to "+"heatmap_"+filename)
+    plt.savefig("heatmap.png")
+    print("Plots saved to "+"heatmap.png")
     plt.show()
 
 if __name__ == "__main__":
